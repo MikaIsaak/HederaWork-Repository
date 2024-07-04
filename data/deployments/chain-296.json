@@ -1,0 +1,35 @@
+{
+  "implementations": {
+    "Token": "0xB0f1AD71bA47Cc10cD925f06E1b467A5544e9592",
+    "ClaimTopicsRegistry": "0x6396f3444dc7b0E06E5D6453bf367E9dfa7A635C",
+    "TrustedIssuersRegistry": "0x9872BAaDb06D14f998e0185138745e8593E6D3D7",
+    "IdentityRegistryStorage": "0xA0AEA5e7Caa342297c4a9309eC1Db7E9aa15a3EB",
+    "IdentityRegistry": "0xb0b0671aA04d79059BdcBAB5C59270bac5dc80A5",
+    "ModularCompliance": "0x3134520cBB0cC9d0fEA9EAE182cCc29b3b20f0C8",
+    "Identity": "0xdf72070C2bCA419215f1b4A57837396F52c0e1B8",
+    "ImplementationAuthority": "0x0EE2CDdFFcDe197319Ba2Ea8684469bbD25c2e79"
+  },
+  "factories": {
+    "IdFactory": "0xCe444169a11761b361D212005334b13A9d454061",
+    "TREXImplementationAuthority": "0x94eDe092ea4480e00174C73BC615c2466743f3dA",
+    "TREXFactory": "0xf17A4C9E2B00398fB11c88060FdE39066b6269b0",
+    "TREXGateway": "0x56C433eca9E534FF5024Eaedb95C652d31B44a09",
+    "IdentityGateway": "0xcfCF11BEe5575c59e1F4a9D5a53c90A4e5e49D0C",
+    "HTSTokenFactory": "0x7ae9b7b41A17F586B12226B3a50bF98Ecf641B5b"
+  },
+  "compliance": {
+    "RequiresNFTModule": "0xA318d349488531882b4fCa6b412A8766F7421044",
+    "CountryAllowModule": "0x73627F621c88A37B3cf212D33716531E53ffd460",
+    "MaxOwnershipByCountryModule": "0x66bf2c085f88AF1b1993364ddB1332095B7AD3Ae"
+  },
+  "vault": {
+    "HederaVault": "0xe95E635753a8A233cB736c5CB0dF181Bb865a90b",
+    "VaultFactory": "0xa221354a965bC0d82da65DEee2f41bBCA5420b73",
+    "StakingToken": "0x0000000000000000000000000000000000423251",
+    "Share": "0x0000000000000000000000000000000000423255",
+    "RewardToken": "0x0000000000000000000000000000000000423252"
+  },
+  "nft": {
+    "HederaNFT": "0xCeabeC99782c70840A8C11eE931473Ec6407678B"
+  }
+}

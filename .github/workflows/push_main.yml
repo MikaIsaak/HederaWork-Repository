@@ -1,0 +1,51 @@
+name: Export ABI workflow
+on:
+    push:
+      branches:
+        - main
+
+jobs:
+  exports-abi:
+    name: "Export ABI's"
+    runs-on: ubuntu-latest
+    environment: testnet #change to mainnet before production
+
+    strategy:
+      matrix:
+        node-version: ['20.x']
+
+    env:
+      RPC_URL: ${{ secrets.RPC_URL }}
+      PRIVATE_KEY: ${{ secrets.PRIVATE_KEY }}
+      ACCOUNT_ID: ${{ secrets.ACCOUNT_ID }}
+
+    steps:      
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+
+      - name: Install Yarn
+        run: npm install --global yarn
+
+      - name: Install Dependencies
+        run: yarn install
+
+      - name: Compile
+        run: yarn run compile
+      
+      - name: Extract and publish ABIs
+        run: |
+            mkdir -p data/abis
+            find ./artifacts/contracts -type f -name "*.json" ! -name "*.dbg.json" -exec cp {} data/abis/ \;
+            
+      - name: Upload ABI
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_options: '--no-verify --signoff'
+          push_options: '--force'
+          file_pattern: './data/abis/*.json'
+
+    

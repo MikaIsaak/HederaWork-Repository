@@ -1,0 +1,128 @@
+{
+  "_format": "hh-sol-artifact-1",
+  "contractName": "IVaultFactory",
+  "sourceName": "contracts/erc4626/factory/IVaultFactory.sol",
+  "abi": [
+    {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "vault",
+          "type": "address"
+        },
+        {
+          "indexed": false,
+          "internalType": "string",
+          "name": "name",
+          "type": "string"
+        },
+        {
+          "indexed": false,
+          "internalType": "string",
+          "name": "symbol",
+          "type": "string"
+        }
+      ],
+      "name": "VaultDeployed",
+      "type": "event"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "string",
+          "name": "salt",
+          "type": "string"
+        },
+        {
+          "components": [
+            {
+              "internalType": "address",
+              "name": "stakingToken",
+              "type": "address"
+            },
+            {
+              "internalType": "string",
+              "name": "shareTokenName",
+              "type": "string"
+            },
+            {
+              "internalType": "string",
+              "name": "shareTokenSymbol",
+              "type": "string"
+            },
+            {
+              "internalType": "address",
+              "name": "vaultRewardController",
+              "type": "address"
+            },
+            {
+              "internalType": "address",
+              "name": "feeConfigController",
+              "type": "address"
+            }
+          ],
+          "internalType": "struct IVaultFactory.VaultDetails",
+          "name": "vaultDetails",
+          "type": "tuple"
+        },
+        {
+          "components": [
+            {
+              "internalType": "address",
+              "name": "receiver",
+              "type": "address"
+            },
+            {
+              "internalType": "address",
+              "name": "token",
+              "type": "address"
+            },
+            {
+              "internalType": "uint256",
+              "name": "feePercentage",
+              "type": "uint256"
+            }
+          ],
+          "internalType": "struct FeeConfiguration.FeeConfig",
+          "name": "feeConfig",
+          "type": "tuple"
+        }
+      ],
+      "name": "deployVault",
+      "outputs": [
+        {
+          "internalType": "address",
+          "name": "vault",
+          "type": "address"
+        }
+      ],
+      "stateMutability": "payable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "vault",
+          "type": "address"
+        }
+      ],
+      "name": "isVaultAvailable",
+      "outputs": [
+        {
+          "internalType": "bool",
+          "name": "",
+          "type": "bool"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    }
+  ],
+  "bytecode": "0x",
+  "deployedBytecode": "0x",
+  "linkReferences": {},
+  "deployedLinkReferences": {}
+}

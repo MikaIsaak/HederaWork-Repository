@@ -1,0 +1,56 @@
+name: Release Workflow
+
+on:
+  release: 
+    types: [released]
+
+jobs:
+  build-test-deploy:
+    runs-on: ubuntu-latest
+    environment: testnet #change to mainnet before production
+
+    strategy:
+      matrix:
+        node-version: ['20.x']
+
+    env:
+      RPC_URL: ${{ secrets.RPC_URL }}
+      PRIVATE_KEY: ${{ secrets.PRIVATE_KEY }}
+      ACCOUNT_ID: ${{ secrets.ACCOUNT_ID }}
+
+    steps:      
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+
+      - name: Install Yarn
+        run: npm install --global yarn
+
+      - name: Install Dependencies
+        run: yarn install
+
+      - name: Compile
+        run: yarn run compile
+
+      - name: Run Tests
+        run: yarn hardhat test test/erc3643/**/**.ts --network hardhat
+
+      # - name: Run HTS Tests
+      #   run: yarn hardhat test test/erc4626/**.ts --network testnet
+
+      - name: Create deployment folder
+        run: mkdir -p ./data/deployments
+
+      - name: Run Deploy
+        run: yarn run deploy --network testnet #change to mainnet before production
+      
+      - name: Export Contract Addresses
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_options: '--no-verify --signoff'
+          branch: main
+          push_options: '--force'
+          file_pattern: './data/deployments/*.json'
