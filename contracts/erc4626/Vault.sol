@@ -7,6 +7,7 @@ import {IERC4626} from "./interfaces/IERC4626.sol";
 import {IHRC} from "../common/hedera/IHRC.sol";
 
 import {FeeConfiguration} from "../common/FeeConfiguration.sol";
+import {TokenBalancer} from "./TokenBalancer.sol";
 
 import {FixedPointMathLib} from "./libraries/FixedPointMathLib.sol";
 import {SafeTransferLib} from "./libraries/SafeTransferLib.sol";
@@ -51,6 +52,9 @@ contract HederaVault is IERC4626, FeeConfiguration, TokenBalancer, Ownable, Reen
         uint256 lastLockedTime;
         mapping(address => uint256) lastClaimedAmountT;
         bool exist;
+        uint256 rewardStart;
+        uint256 rewardEnd;
+        uint256 accumulatedReward;
     }
 
     // Rewards Info struct
@@ -268,6 +272,9 @@ contract HederaVault is IERC4626, FeeConfiguration, TokenBalancer, Ownable, Reen
             userContribution[msg.sender].sharesAmount = _amount;
             userContribution[msg.sender].exist = true;
             userContribution[msg.sender].lastLockedTime = block.timestamp;
+            userContribution[msg.sender].rewardStart = block.timestamp;
+            // We can change vesting to neccessary time period
+            userContribution[msg.sender].rewardEnd = block.timestamp + 30 days;
             assetTotalSupply += _amount;
         } else {
             claimAllReward(0);
@@ -415,6 +422,7 @@ contract HederaVault is IERC4626, FeeConfiguration, TokenBalancer, Ownable, Reen
      * @param _amount The amount of reward token to add.
      */
     function addReward(address _token, uint256 _amount) external payable onlyRole(VAULT_REWARD_CONTROLLER_ROLE) {
+        require(_token != address(0), "Vault: Token address can't be zero");
         require(_amount != 0, "Vault: Amount can't be zero");
         require(assetTotalSupply != 0, "Vault: No token staked yet");
         require(_token != address(asset) && _token != share, "Vault: Reward and Staking tokens cannot be same");
@@ -445,16 +453,33 @@ contract HederaVault is IERC4626, FeeConfiguration, TokenBalancer, Ownable, Reen
     function claimAllReward(uint256 _startPosition) public payable returns (uint256, uint256) {
         uint256 rewardTokensSize = rewardTokens.length;
         address _token = feeConfig.token;
-        //New functionality
+        uint256 currentTime = block.timestamp;
 
         for (uint256 i = _startPosition; i < rewardTokensSize && i < _startPosition + 10; i++) {
             uint256 reward;
             address token = rewardTokens[i];
             reward = (tokensRewardInfo[token].amount - userContribution[msg.sender].lastClaimedAmountT[token])
                 .mulDivDown(1, userContribution[msg.sender].sharesAmount);
+
+            (uint256 unlockedReward, uint256 remainingReward) = calculateUnlockedReward(
+                reward,
+                userContribution[msg.sender].rewardStart,
+                userContribution[msg.sender].rewardEnd,
+                currentTime
+            );
+
+            userContribution[msg.sender].accumulatedReward += unlockedReward;
+
             userContribution[msg.sender].lastClaimedAmountT[token] = tokensRewardInfo[token].amount;
-            SafeHTS.safeTransferToken(token, address(this), msg.sender, int64(uint64(reward)));
-            if (_token != address(0)) _deductFee(reward);
+            SafeHTS.safeTransferToken(
+                token,
+                address(this),
+                msg.sender,
+                int64(uint64(userContribution[msg.sender].accumulatedReward))
+            );
+            userContribution[msg.sender].accumulatedReward = 0;
+
+            if (_token != address(0)) _deductFee(userContribution[msg.sender].accumulatedReward);
         }
         return (_startPosition, rewardTokensSize);
     }
@@ -467,6 +492,8 @@ contract HederaVault is IERC4626, FeeConfiguration, TokenBalancer, Ownable, Reen
      * @return unclaimedAmount The calculated rewards.
      */
     function getUserReward(address _user, address _rewardToken) public view returns (uint256 unclaimedAmount) {
+        require(_user != address(0), "Vault: User address can't be zero");
+        require(_rewardToken != address(0), "Vault: Reward token address can't be zero");
         RewardsInfo storage _rewardInfo = tokensRewardInfo[_rewardToken];
 
         uint256 perShareAmount = _rewardInfo.amount;
@@ -474,7 +501,12 @@ contract HederaVault is IERC4626, FeeConfiguration, TokenBalancer, Ownable, Reen
         uint256 userStakingTokenTotal = cInfo.sharesAmount;
         uint256 perShareClaimedAmount = cInfo.lastClaimedAmountT[_rewardToken];
         uint256 perShareUnclaimedAmount = perShareAmount - perShareClaimedAmount;
-        unclaimedAmount = perShareUnclaimedAmount.mulDivDown(1, userStakingTokenTotal);
+        uint256 reward = perShareUnclaimedAmount.mulDivDown(1, userStakingTokenTotal);
+
+        uint256 currentTime = block.timestamp;
+        (uint256 unlockedReward, ) = calculateUnlockedReward(reward, cInfo.rewardStart, cInfo.rewardEnd, currentTime);
+
+        unclaimedAmount = unlockedReward;
 
         if (feeConfig.feePercentage > 0) {
             uint256 currentFee = _calculateFee(unclaimedAmount, feeConfig.feePercentage);
@@ -482,13 +514,48 @@ contract HederaVault is IERC4626, FeeConfiguration, TokenBalancer, Ownable, Reen
         }
     }
 
+    /**
+     * @dev Returns all rewards for a user.
+     *
+     * @param _user The user address.
+     * @return _rewards The calculated rewards.
+     */
     function getAllRewards(address _user) public view returns (uint256[] memory) {
-        uint256[] memory _rewards;
+        require(_user != address(0), "Vault: User address can't be zero");
+        uint256[] memory _rewards = new uint256[](rewardTokens.length);
 
         for (uint256 i = 0; i < rewardTokens.length; i++) {
             _rewards[i] = getUserReward(_user, rewardTokens[i]);
         }
         return _rewards;
+    }
+
+    /**
+     * @dev Calculates the unlocked reward amount.
+     *
+     * @param _reward The reward amount.
+     * @param _rewardStart The reward start time.
+     * @param _rewardEnd The reward end time.
+     * @param _currentTime The current time.
+     * @return unlockedReward The unlocked reward amount.
+     * @return remainingReward The remaining reward amount.
+     */
+    function calculateUnlockedReward(
+        uint256 _reward,
+        uint256 _rewardStart,
+        uint256 _rewardEnd,
+        uint256 _currentTime
+    ) internal pure returns (uint256 unlockedReward, uint256 remainingReward) {
+        if (_currentTime <= _rewardStart) {
+            return (0, _reward);
+        } else if (_currentTime >= _rewardEnd) {
+            return (_reward, 0);
+        } else {
+            uint256 timeElapsed = _currentTime - _rewardStart;
+            uint256 totalVestingTime = _rewardEnd - _rewardStart;
+            unlockedReward = _reward.mulDivDown(timeElapsed, totalVestingTime);
+            remainingReward = _reward - unlockedReward;
+        }
     }
 }
 
