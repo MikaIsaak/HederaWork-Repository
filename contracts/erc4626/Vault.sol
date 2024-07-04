@@ -3,13 +3,13 @@ pragma solidity 0.8.24;
 pragma abicoder v2;
 
 import {ERC20} from "./ERC20.sol";
-import {IERC4626} from "./IERC4626.sol";
+import {IERC4626} from "./interfaces/IERC4626.sol";
 import {IHRC} from "../common/hedera/IHRC.sol";
 
 import {FeeConfiguration} from "../common/FeeConfiguration.sol";
 
-import {FixedPointMathLib} from "./FixedPointMathLib.sol";
-import {SafeTransferLib} from "./SafeTransferLib.sol";
+import {FixedPointMathLib} from "./libraries/FixedPointMathLib.sol";
+import {SafeTransferLib} from "./libraries/SafeTransferLib.sol";
 
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
@@ -22,7 +22,7 @@ import "../common/safe-HTS/IHederaTokenService.sol";
  *
  * The contract which represents a custom Vault with Hedera HTS support.
  */
-contract HederaVault is IERC4626, FeeConfiguration, Ownable, ReentrancyGuard {
+contract HederaVault is IERC4626, FeeConfiguration, TokenBalancer, Ownable, ReentrancyGuard {
     using SafeTransferLib for ERC20;
     using FixedPointMathLib for uint256;
     using Bits for uint256;
@@ -92,11 +92,18 @@ contract HederaVault is IERC4626, FeeConfiguration, Ownable, ReentrancyGuard {
         string memory _symbol,
         FeeConfig memory _feeConfig,
         address _vaultRewardController,
-        address _feeConfigController
+        address _feeConfigController,
+        address _pyth,
+        address _saucerSwap,
+        address[] memory _rewardTokens,
+        uint256[] memory allocationPercentage,
+        bytes32[] memory _priceIds
     ) payable ERC20(_name, _symbol, _underlying.decimals()) Ownable(msg.sender) {
         __FeeConfiguration_init(_feeConfig, _vaultRewardController, _feeConfigController);
+        __TokenBalancer_init(_pyth, _saucerSwap, _rewardTokens, allocationPercentage, _priceIds);
 
         asset = _underlying;
+        _rewardTokens = rewardTokens;
 
         _createTokenWithContractAsOwner(_name, _symbol, _underlying);
     }

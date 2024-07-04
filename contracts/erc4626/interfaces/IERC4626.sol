@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 pragma solidity 0.8.24;
 
-import {ERC20} from "./ERC20.sol";
+import {ERC20} from "../ERC20.sol";
 
 abstract contract IERC4626 is ERC20 {
     /*///////////////////////////////////////////////////////////////
@@ -31,7 +31,7 @@ abstract contract IERC4626 is ERC20 {
     event Withdraw(address indexed sender, address indexed receiver, uint256 assets, uint256 shares);
 
     error ZeroShares(uint256 numberOfShares);
-    
+
     error MaxRewardTokensAmount();
 
     /*///////////////////////////////////////////////////////////////
