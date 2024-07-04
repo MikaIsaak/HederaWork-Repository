@@ -445,6 +445,7 @@ contract HederaVault is IERC4626, FeeConfiguration, TokenBalancer, Ownable, Reen
     function claimAllReward(uint256 _startPosition) public payable returns (uint256, uint256) {
         uint256 rewardTokensSize = rewardTokens.length;
         address _token = feeConfig.token;
+        //Will have new logic here
 
         for (uint256 i = _startPosition; i < rewardTokensSize && i < _startPosition + 10; i++) {
             uint256 reward;
