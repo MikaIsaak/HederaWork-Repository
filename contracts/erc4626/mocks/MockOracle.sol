@@ -3,9 +3,12 @@ pragma solidity 0.8.24;
 
 import {IPyth} from "@pythnetwork/pyth-sdk-solidity/IPyth.sol";
 import {PythStructs} from "@pythnetwork/pyth-sdk-solidity/PythStructs.sol";
+import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 
-contract MockPyth is IPyth {
+contract MockOracle is IPyth, Ownable {
     mapping(bytes32 => PythStructs.Price) public prices;
+
+    constructor() Ownable(msg.sender) {}
 
     // Function to set mock prices
     function setPrice(bytes32 id, int64 price, uint64 conf, int32 expo, uint publishTime) public {
