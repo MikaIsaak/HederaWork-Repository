@@ -46,21 +46,31 @@ contract HederaVault is IERC4626, FeeConfiguration, TokenBalancer, Ownable, Reen
     // Reward info by user
     mapping(address => RewardsInfo) public tokensRewardInfo;
 
+    // User Deposit struct
+    struct UserDeposit {
+        uint256 amount;
+        uint256 timestamp;
+        mapping(address => uint256) claimedRewards;
+    }
+
     // User Info struct
     struct UserInfo {
         uint256 sharesAmount;
-        uint256 lastLockedTime;
-        mapping(address => uint256) lastClaimedAmountT;
         bool exist;
-        uint256 rewardStart;
-        uint256 rewardEnd;
-        uint256 accumulatedReward;
+        UserDeposit[] deposits;
     }
 
-    // Rewards Info struct
+    // Reward Info struct
     struct RewardsInfo {
-        uint256 amount;
-        bool exist;
+        uint256 vestingPeriod;
+        RewardPeriod[] rewardPeriods;
+    }
+
+    // Reward Period struct
+    struct RewardPeriod {
+        uint256 startTime;
+        uint256 endTime;
+        uint256 rewardPerShare;
     }
 
     /**
@@ -107,7 +117,7 @@ contract HederaVault is IERC4626, FeeConfiguration, TokenBalancer, Ownable, Reen
         __TokenBalancer_init(_pyth, _saucerSwap, _rewardTokens, allocationPercentage, _priceIds);
 
         asset = _underlying;
-        _rewardTokens = rewardTokens;
+        rewardTokens = _rewardTokens;
 
         _createTokenWithContractAsOwner(_name, _symbol, _underlying);
     }
@@ -259,29 +269,36 @@ contract HederaVault is IERC4626, FeeConfiguration, TokenBalancer, Ownable, Reen
     /**
      * @dev Updates user state after deposit and mint calls.
      *
-     * @param _amount The amount of shares.
+     * This function updates the user's contribution information after they deposit tokens into the vault.
+     * If it's the user's first deposit, it associates the reward tokens with the user.
+     *
+     * @param _amount The amount of tokens deposited.
      */
     function afterDeposit(uint256 _amount) internal {
+        // Ensure the amount is not zero
+        require(_amount != 0, "Vault: Amount can't be zero");
+
+        // Check if the user is making their first deposit
         if (!userContribution[msg.sender].exist) {
+            // For the first deposit, associate all reward tokens with the user
             uint256 rewardTokensSize = rewardTokens.length;
-            for (uint256 i; i < rewardTokensSize; i++) {
+            for (uint256 i = 0; i < rewardTokensSize; i++) {
                 address token = rewardTokens[i];
-                userContribution[msg.sender].lastClaimedAmountT[token] = tokensRewardInfo[token].amount;
                 IHRC(token).associate();
             }
+
+            // Initialize the user's contribution with the deposited amount
             userContribution[msg.sender].sharesAmount = _amount;
             userContribution[msg.sender].exist = true;
-            userContribution[msg.sender].lastLockedTime = block.timestamp;
-            userContribution[msg.sender].rewardStart = block.timestamp;
-            // We can change vesting to neccessary time period
-            userContribution[msg.sender].rewardEnd = block.timestamp + 30 days;
-            assetTotalSupply += _amount;
         } else {
-            claimAllReward(0);
+            // For subsequent deposits, add the deposited amount to the user's shares
             userContribution[msg.sender].sharesAmount += _amount;
-            userContribution[msg.sender].lastLockedTime = block.timestamp;
-            assetTotalSupply += _amount;
         }
+
+        // Create a new deposit entry for the user
+        UserDeposit storage newDeposit = userContribution[msg.sender].deposits.push();
+        newDeposit.amount = _amount;
+        newDeposit.timestamp = block.timestamp;
     }
 
     /*///////////////////////////////////////////////////////////////
@@ -416,102 +433,192 @@ contract HederaVault is IERC4626, FeeConfiguration, TokenBalancer, Ownable, Reen
     //////////////////////////////////////////////////////////////*/
 
     /**
-     * @dev Adds reward to the Vault.
+     * @dev Adds reward to the Vault with a specified vesting period.
+     *
+     * This function is called by an authorized user to add rewards to the vault. It associates
+     * the reward token with the contract, updates the reward periods, and transfers the reward tokens
+     * to the vault.
      *
      * @param _token The reward token address.
      * @param _amount The amount of reward token to add.
+     * @param _vestingPeriod The vesting period for the reward token.
      */
-    function addReward(address _token, uint256 _amount) external payable onlyRole(VAULT_REWARD_CONTROLLER_ROLE) {
+    function addReward(
+        address _token,
+        uint256 _amount,
+        uint256 _vestingPeriod
+    ) external payable onlyRole(VAULT_REWARD_CONTROLLER_ROLE) {
+        // Ensure the token address is not zero, which would be invalid
         require(_token != address(0), "Vault: Token address can't be zero");
+
+        // Ensure the amount is not zero, which would be invalid
         require(_amount != 0, "Vault: Amount can't be zero");
+
+        // Ensure that there are tokens staked in the vault
         require(assetTotalSupply != 0, "Vault: No token staked yet");
+
+        // Ensure the vesting period is not zero, which would be invalid
+        require(_vestingPeriod != 0, "Vault: Vesting period can't be zero");
+
+        // Ensure the reward token is not the same as the staking token or the share token
         require(_token != address(asset) && _token != share, "Vault: Reward and Staking tokens cannot be same");
 
-        if (rewardTokens.length == 10) revert MaxRewardTokensAmount();
-
-        uint256 perShareRewards = _amount.mulDivDown(1, assetTotalSupply);
+        // Retrieve the reward info for the specified token
         RewardsInfo storage rewardInfo = tokensRewardInfo[_token];
-        if (!rewardInfo.exist) {
-            rewardTokens.push(_token);
-            rewardInfo.exist = true;
-            rewardInfo.amount = perShareRewards;
-            SafeHTS.safeAssociateToken(_token, address(this));
-            ERC20(_token).safeTransferFrom(msg.sender, address(this), _amount);
-        } else {
-            tokensRewardInfo[_token].amount += perShareRewards;
-            ERC20(_token).safeTransferFrom(msg.sender, address(this), _amount);
+
+        // Get the current time for reward period calculations
+        uint256 currentTime = block.timestamp;
+
+        // Check if the token is already in the reward tokens list
+        bool tokenExists = false;
+        uint256 rewardTokensSize = rewardTokens.length;
+        for (uint256 i = 0; i < rewardTokensSize; i++) {
+            if (rewardTokens[i] == _token) {
+                tokenExists = true;
+                break;
+            }
         }
+
+        // If the token is not already in the reward tokens list, add it
+        if (!tokenExists) {
+            rewardTokens.push(_token);
+
+            // Set the vesting period for the new reward token
+            rewardInfo.vestingPeriod = _vestingPeriod;
+
+            // Associate the reward token with the vault
+            SafeHTS.safeAssociateToken(_token, address(this));
+        }
+
+        // Add a new reward period for the token
+        _addRewardPeriod(_token, _amount, currentTime);
+
+        // Transfer the reward tokens from the sender to the vault
+        ERC20(_token).safeTransferFrom(msg.sender, address(this), _amount);
+
+        // Emit an event indicating that the reward has been added
         emit RewardAdded(_token, _amount);
     }
 
     /**
      * @dev Claims all pending reward tokens for the caller.
      *
+     * This function allows a user to claim all their pending rewards for all reward tokens
+     * starting from a specified position in the reward token list. It calculates the total
+     * unlocked rewards for each token and transfers them to the caller.
+     *
      * @param _startPosition The starting index in the reward token list from which to begin claiming rewards.
      * @return The index of the start position after the last claimed reward and the total number of reward tokens.
      */
     function claimAllReward(uint256 _startPosition) public payable returns (uint256, uint256) {
+        // Get the total number of reward tokens available in the vault
         uint256 rewardTokensSize = rewardTokens.length;
-        address _token = feeConfig.token;
-        uint256 currentTime = block.timestamp;
 
+        // Loop through the reward tokens starting from the specified position
         for (uint256 i = _startPosition; i < rewardTokensSize && i < _startPosition + 10; i++) {
-            uint256 reward;
+            // Get the current reward token address
             address token = rewardTokens[i];
-            reward = (tokensRewardInfo[token].amount - userContribution[msg.sender].lastClaimedAmountT[token])
-                .mulDivDown(1, userContribution[msg.sender].sharesAmount);
+            // Calculate the total unlocked reward for the caller for this token
+            uint256 totalUnlockedReward = getUserReward(token, msg.sender);
 
-            (uint256 unlockedReward, uint256 remainingReward) = calculateUnlockedReward(
-                reward,
-                userContribution[msg.sender].rewardStart,
-                userContribution[msg.sender].rewardEnd,
-                currentTime
-            );
+            // If there are no rewards to claim, skip to the next token
+            if (totalUnlockedReward == 0) {
+                continue;
+            }
 
-            userContribution[msg.sender].accumulatedReward += unlockedReward;
-
-            userContribution[msg.sender].lastClaimedAmountT[token] = tokensRewardInfo[token].amount;
-            SafeHTS.safeTransferToken(
-                token,
-                address(this),
-                msg.sender,
-                int64(uint64(userContribution[msg.sender].accumulatedReward))
-            );
-            userContribution[msg.sender].accumulatedReward = 0;
-
-            if (_token != address(0)) _deductFee(userContribution[msg.sender].accumulatedReward);
+            // Transfer the unlocked reward tokens from the vault to the caller
+            SafeHTS.safeTransferToken(token, address(this), msg.sender, int64(uint64(totalUnlockedReward)));
         }
+
+        // Return the start position after the last claimed reward and the total number of reward tokens
         return (_startPosition, rewardTokensSize);
     }
 
     /**
-     * @dev Returns rewards for a user with fee considering.
+     * @dev Returns user reward of a specific token.
+     *
+     * This function calculates the total unlocked reward for a given user and token.
+     * It considers all the deposits made by the user and computes the unlocked rewards
+     * based on the reward periods.
      *
      * @param _user The user address.
-     * @param _rewardToken The reward address.
-     * @return unclaimedAmount The calculated rewards.
+     * @param _token The reward token address.
+     * @return unclaimedAmount The total amount of unclaimed rewards.
      */
-    function getUserReward(address _user, address _rewardToken) public view returns (uint256 unclaimedAmount) {
+    function getUserReward(address _user, address _token) public view returns (uint256 unclaimedAmount) {
+        // Ensure the user address is not zero, which would be invalid
         require(_user != address(0), "Vault: User address can't be zero");
-        require(_rewardToken != address(0), "Vault: Reward token address can't be zero");
-        RewardsInfo storage _rewardInfo = tokensRewardInfo[_rewardToken];
 
-        uint256 perShareAmount = _rewardInfo.amount;
-        UserInfo storage cInfo = userContribution[_user];
-        uint256 userStakingTokenTotal = cInfo.sharesAmount;
-        uint256 perShareClaimedAmount = cInfo.lastClaimedAmountT[_rewardToken];
-        uint256 perShareUnclaimedAmount = perShareAmount - perShareClaimedAmount;
-        uint256 reward = perShareUnclaimedAmount.mulDivDown(1, userStakingTokenTotal);
+        // Ensure the token address is not zero, which would be invalid
+        require(_token != address(0), "Vault: Token address can't be zero");
 
+        // Retrieve the user's info including their deposits
+        UserInfo storage userInfo = userContribution[_user];
+
+        // Retrieve the reward info for the specified token
+        RewardsInfo storage rewardInfo = tokensRewardInfo[_token];
+
+        // Get the current time for reward calculations
         uint256 currentTime = block.timestamp;
-        (uint256 unlockedReward, ) = calculateUnlockedReward(reward, cInfo.rewardStart, cInfo.rewardEnd, currentTime);
 
-        unclaimedAmount = unlockedReward;
+        // Initialize total reward to zero
+        uint256 totalReward = 0;
 
-        if (feeConfig.feePercentage > 0) {
-            uint256 currentFee = _calculateFee(unclaimedAmount, feeConfig.feePercentage);
-            unclaimedAmount -= currentFee;
+        // Get the number of deposits the user has made
+        uint256 userDepositsLength = userInfo.deposits.length;
+
+        // Get the number of reward periods for the token
+        uint256 rewardPeriodsLength = rewardInfo.rewardPeriods.length;
+
+        // Loop through each deposit the user has made
+        for (uint256 i = 0; i < userDepositsLength; i++) {
+            // Get the specific deposit information
+            UserDeposit storage depositStr = userInfo.deposits[i];
+
+            // Initialize unlocked reward for this deposit to zero
+            uint256 unlockedReward = 0;
+
+            // Calculate the end time for the vesting period of this deposit
+            uint256 vestingEndTime = depositStr.timestamp + rewardInfo.vestingPeriod;
+
+            // Loop through each reward period for the token
+            for (uint256 j = 0; j < rewardPeriodsLength; j++) {
+                // Get the specific reward period information
+                RewardPeriod storage period = rewardInfo.rewardPeriods[j];
+
+                // Skip this period if it starts after the vesting period ends
+                if (period.startTime > vestingEndTime) {
+                    continue;
+                }
+
+                // Calculate the elapsed time for the current period
+                uint256 timeElapsed;
+                if (currentTime > vestingEndTime) {
+                    // If the current time is past the vesting end time, calculate time up to the vesting end time
+                    timeElapsed = vestingEndTime - period.startTime;
+                } else {
+                    // Otherwise, calculate time up to the current time
+                    timeElapsed = currentTime - period.startTime;
+                }
+
+                // If the reward period has ended, adjust the elapsed time accordingly
+                if (period.endTime != 0 && currentTime > period.endTime) {
+                    timeElapsed = period.endTime - period.startTime;
+                }
+
+                // Calculate the unlocked reward for this period and add it to the total unlocked reward
+                unlockedReward += (depositStr.amount * period.rewardPerShare * timeElapsed) / rewardInfo.vestingPeriod;
+            }
+
+            // Subtract any previously claimed rewards for this deposit
+            unlockedReward -= depositStr.claimedRewards[_token];
+
+            // Add the unlocked reward for this deposit to the total reward
+            totalReward += unlockedReward;
         }
+
+        // Return the total unclaimed reward for the user
+        return totalReward;
     }
 
     /**
@@ -531,31 +638,39 @@ contract HederaVault is IERC4626, FeeConfiguration, TokenBalancer, Ownable, Reen
     }
 
     /**
-     * @dev Calculates the unlocked reward amount.
+     * @dev Adds a new reward period for a given token.
      *
-     * @param _reward The reward amount.
-     * @param _rewardStart The reward start time.
-     * @param _rewardEnd The reward end time.
-     * @param _currentTime The current time.
-     * @return unlockedReward The unlocked reward amount.
-     * @return remainingReward The remaining reward amount.
+     * This function sets up a new reward period, ensuring that the previous period ends at the current time.
+     *
+     * @param _token The reward token address.
+     * @param _amount The amount of reward token to add.
+     * @param _currentTime The current block timestamp.
      */
-    function calculateUnlockedReward(
-        uint256 _reward,
-        uint256 _rewardStart,
-        uint256 _rewardEnd,
-        uint256 _currentTime
-    ) internal pure returns (uint256 unlockedReward, uint256 remainingReward) {
-        if (_currentTime <= _rewardStart) {
-            return (0, _reward);
-        } else if (_currentTime >= _rewardEnd) {
-            return (_reward, 0);
-        } else {
-            uint256 timeElapsed = _currentTime - _rewardStart;
-            uint256 totalVestingTime = _rewardEnd - _rewardStart;
-            unlockedReward = _reward.mulDivDown(timeElapsed, totalVestingTime);
-            remainingReward = _reward - unlockedReward;
+    function _addRewardPeriod(address _token, uint256 _amount, uint256 _currentTime) internal {
+        // Ensure the token address is not zero (an invalid address)
+        require(_token != address(0), "Vault: Token address can't be zero");
+        // Ensure the amount is not zero
+        require(_amount != 0, "Vault: Amount can't be zero");
+        // Ensure the current time is not zero
+        require(_currentTime != 0, "Vault: Current time can't be zero");
+
+        // Retrieve the rewards information for the specified token
+        RewardsInfo storage rewardInfo = tokensRewardInfo[_token];
+        // Get the number of existing reward periods for this token
+        uint256 rewardPeriodsLength = rewardInfo.rewardPeriods.length;
+
+        // If there are existing reward periods, update the end time of the last period
+        if (rewardPeriodsLength > 0) {
+            rewardInfo.rewardPeriods[rewardPeriodsLength - 1].endTime = _currentTime;
         }
+
+        // Calculate the reward per share for the new period
+        uint256 rewardPerShare = _amount / assetTotalSupply;
+
+        // Add a new reward period starting at the current time with the calculated reward per share
+        rewardInfo.rewardPeriods.push(
+            RewardPeriod({startTime: _currentTime, endTime: 0, rewardPerShare: rewardPerShare})
+        );
     }
 }
 
