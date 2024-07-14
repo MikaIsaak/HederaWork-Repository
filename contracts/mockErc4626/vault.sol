@@ -1,22 +1,12 @@
 // SPDX-License-Identifier: MIT
-pragma solidity 0.8.24;
+pragma solidity ^0.8.0;
 pragma abicoder v2;
 
-import {ERC20} from "./ERC20.sol";
-import {IERC4626} from "./interfaces/IERC4626.sol";
-import {IHRC} from "../common/hedera/IHRC.sol";
+import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import "@openzeppelin/contracts/access/Ownable.sol";
 
-import {FeeConfiguration} from "../common/FeeConfiguration.sol";
-import {TokenBalancer} from "./TokenBalancer.sol";
-
-import {FixedPointMathLib} from "./libraries/FixedPointMathLib.sol";
-import {SafeTransferLib} from "./libraries/SafeTransferLib.sol";
-
-import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
-import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
-
-import "../common/safe-HTS/SafeHTS.sol";
-import "../common/safe-HTS/IHederaTokenService.sol";
+// import "@openzeppelin/contracts/utils/math/SafeMath.sol";
 
 /**
  * @title Vault
@@ -68,22 +58,13 @@ library SafeMath {
     }
 }
 
-/**
- * @title Hedera Vault
- *
- * The contract which represents a custom Vault with Hedera HTS support.
- */
-contract HederaVault is IERC4626, FeeConfiguration, TokenBalancer, Ownable, ReentrancyGuard {
-    using SafeTransferLib for ERC20;
-    using FixedPointMathLib for uint256;
+contract Vault is Ownable, ReentrancyGuard {
     using SafeMath for uint256;
-    using Bits for uint256;
-
     // Staking token
     ERC20 public immutable asset;
 
     // Share token
-    address public share;
+    CustomERC20 public share;
 
     // Staked amount
     uint256 public assetTotalSupply;
@@ -103,6 +84,9 @@ contract HederaVault is IERC4626, FeeConfiguration, TokenBalancer, Ownable, Reen
         uint256 timestamp;
         mapping(address => uint256) claimedRewards;
     }
+    event Deposit(address indexed user, address indexed receiver, uint256 assets, uint256 shares);
+    event Withdraw(address indexed user, address indexed receiver, uint256 assets, uint256 shares);
+    event RewardsClaimed(address indexed user, uint256 totalRewards, address indexed rewardToken);
 
     // User Info struct
     struct UserInfo {
@@ -125,14 +109,6 @@ contract HederaVault is IERC4626, FeeConfiguration, TokenBalancer, Ownable, Reen
     }
 
     /**
-     * @notice CreatedToken event.
-     * @dev Emitted after contract initialization, when share token was deployed.
-     *
-     * @param createdToken The address of share token.
-     */
-    event CreatedToken(address indexed createdToken);
-
-    /**
      * @notice RewardAdded event.
      * @dev Emitted when permissioned user adds reward to the Vault.
      *
@@ -147,62 +123,17 @@ contract HederaVault is IERC4626, FeeConfiguration, TokenBalancer, Ownable, Reen
      * @param _underlying The address of the asset token.
      * @param _name The share token name.
      * @param _symbol The share token symbol.
-     * @param _feeConfig The fee configuration struct.
-     * @param _vaultRewardController The Vault reward controller user.
-     * @param _feeConfigController The fee config controller user.
+     * @param _rewardTokens The reward tokens addresses.
      */
     constructor(
         ERC20 _underlying,
         string memory _name,
         string memory _symbol,
-        FeeConfig memory _feeConfig,
-        address _vaultRewardController,
-        address _feeConfigController,
-        address _pyth,
-        address _saucerSwap,
-        address[] memory _rewardTokens,
-        uint256[] memory allocationPercentage,
-        bytes32[] memory _priceIds
-    ) payable ERC20(_name, _symbol, _underlying.decimals()) Ownable(msg.sender) {
-        __FeeConfiguration_init(_feeConfig, _vaultRewardController, _feeConfigController);
-        __TokenBalancer_init(_pyth, _saucerSwap, _rewardTokens, allocationPercentage, _priceIds);
-
+        address[] memory _rewardTokens
+    ) payable Ownable(msg.sender) {
         asset = _underlying;
+        share = new CustomERC20(_name, _symbol);
         rewardTokens = _rewardTokens;
-
-        _createTokenWithContractAsOwner(_name, _symbol, _underlying);
-    }
-
-    function _createTokenWithContractAsOwner(string memory _name, string memory _symbol, ERC20 _underlying) internal {
-        SafeHTS.safeAssociateToken(address(_underlying), address(this));
-        uint256 supplyKeyType;
-        uint256 adminKeyType;
-
-        IHederaTokenService.KeyValue memory supplyKeyValue;
-        supplyKeyType = supplyKeyType.setBit(4);
-        supplyKeyValue.delegatableContractId = address(this);
-
-        IHederaTokenService.KeyValue memory adminKeyValue;
-        adminKeyType = adminKeyType.setBit(0);
-        adminKeyValue.delegatableContractId = address(this);
-
-        IHederaTokenService.TokenKey[] memory keys = new IHederaTokenService.TokenKey[](2);
-
-        keys[0] = IHederaTokenService.TokenKey(supplyKeyType, supplyKeyValue);
-        keys[1] = IHederaTokenService.TokenKey(adminKeyType, adminKeyValue);
-
-        IHederaTokenService.Expiry memory expiry;
-        expiry.autoRenewAccount = address(this);
-        expiry.autoRenewPeriod = 8000000;
-
-        IHederaTokenService.HederaToken memory newToken;
-        newToken.name = _name;
-        newToken.symbol = _symbol;
-        newToken.treasury = address(this);
-        newToken.expiry = expiry;
-        newToken.tokenKeys = keys;
-        share = SafeHTS.safeCreateFungibleToken(newToken, 0, _underlying.decimals());
-        emit CreatedToken(share);
     }
 
     /*///////////////////////////////////////////////////////////////
@@ -216,16 +147,15 @@ contract HederaVault is IERC4626, FeeConfiguration, TokenBalancer, Ownable, Reen
      * @param receiver The shares receiver address.
      * @return shares The amount of shares to receive.
      */
-    function deposit(uint256 assets, address receiver) public override nonReentrant returns (uint256 shares) {
-        if ((shares = previewDeposit(assets)) == 0) revert ZeroShares(assets);
+    function deposit(uint256 assets, address receiver) public nonReentrant returns (uint256 shares) {
+        if ((shares = previewDeposit(assets)) == 0) revert("ZeroShares");
 
-        asset.safeTransferFrom(msg.sender, address(this), assets);
+        // asset.transferFrom(msg.sender, address(this), assets);
+        asset.transferFrom(receiver, address(this), assets);
 
         assetTotalSupply += assets;
 
-        SafeHTS.safeMintToken(share, uint64(assets), new bytes[](0));
-
-        SafeHTS.safeTransferToken(share, address(this), msg.sender, int64(uint64(assets)));
+        share.mint(receiver, shares);
 
         emit Deposit(msg.sender, receiver, assets, shares);
 
@@ -233,73 +163,23 @@ contract HederaVault is IERC4626, FeeConfiguration, TokenBalancer, Ownable, Reen
     }
 
     /**
-     * @dev Mints shares to receiver by depositing assets of underlying tokens.
-     *
-     * @param shares The amount of shares to send.
-     * @param to The receiver of tokens.
-     * @return amount The amount of tokens to receive.
-     */
-    function mint(uint256 shares, address to) public override nonReentrant returns (uint256 amount) {
-        _mint(to, amount = previewMint(shares));
-
-        assetTotalSupply += amount;
-
-        emit Deposit(msg.sender, to, amount, shares);
-
-        asset.safeTransferFrom(msg.sender, address(this), amount);
-
-        afterDeposit(amount);
-    }
-
-    /**
-     * @dev Burns shares from owner and sends assets of underlying tokens to receiver.
+     * @dev Withdraws assets from the Vault.
      *
      * @param amount The amount of assets.
      * @param receiver The staking token receiver.
      * @param from The owner of shares.
      * @return shares The amount of shares to burn.
      */
-    function withdraw(
-        uint256 amount,
-        address receiver,
-        address from
-    ) public override nonReentrant returns (uint256 shares) {
+    function withdraw(uint256 amount, address receiver, address from) public nonReentrant returns (uint256 shares) {
         beforeWithdraw(amount);
 
-        // _burn(from, shares = previewWithdraw(amount));
+        shares = previewWithdraw(amount);
+        share.burnFrom(from, shares);
         assetTotalSupply -= amount;
 
-        SafeHTS.safeTransferToken(share, msg.sender, address(this), int64(uint64(amount)));
-
-        SafeHTS.safeBurnToken(share, uint64(amount), new int64[](0));
-
-        asset.safeTransfer(receiver, amount);
+        asset.transfer(receiver, amount);
 
         emit Withdraw(from, receiver, amount, shares);
-    }
-
-    /**
-     * @dev Redeems shares for underlying assets.
-     *
-     * @param shares The amount of shares.
-     * @param receiver The staking token receiver.
-     * @param from The shares owner.
-     * @return amount The amount of shares to burn.
-     */
-    function redeem(
-        uint256 shares,
-        address receiver,
-        address from
-    ) public override nonReentrant returns (uint256 amount) {
-        require((amount = previewRedeem(shares)) != 0, "ZERO_ASSETS");
-
-        amount = previewRedeem(shares);
-        _burn(from, shares);
-        assetTotalSupply -= amount;
-
-        emit Withdraw(from, receiver, amount, shares);
-
-        asset.safeTransfer(receiver, amount);
     }
 
     /*///////////////////////////////////////////////////////////////
@@ -312,7 +192,6 @@ contract HederaVault is IERC4626, FeeConfiguration, TokenBalancer, Ownable, Reen
      * @param _amount The amount of shares.
      */
     function beforeWithdraw(uint256 _amount) internal {
-        // claimAllReward(0);
         userContribution[msg.sender].sharesAmount -= _amount;
         assetTotalSupply -= _amount;
     }
@@ -331,13 +210,6 @@ contract HederaVault is IERC4626, FeeConfiguration, TokenBalancer, Ownable, Reen
 
         // Check if the user is making their first deposit
         if (!userContribution[msg.sender].exist) {
-            // For the first deposit, associate all reward tokens with the user
-            uint256 rewardTokensSize = rewardTokens.length;
-            for (uint256 i = 0; i < rewardTokensSize; i++) {
-                address token = rewardTokens[i];
-                IHRC(token).associate();
-            }
-
             // Initialize the user's contribution with the deposited amount
             userContribution[msg.sender].sharesAmount = _amount;
             userContribution[msg.sender].exist = true;
@@ -370,7 +242,7 @@ contract HederaVault is IERC4626, FeeConfiguration, TokenBalancer, Ownable, Reen
      *
      * @return Asset balance of this contract.
      */
-    function totalAssets() public view override returns (uint256) {
+    function totalAssets() public view returns (uint256) {
         return asset.balanceOf(address(this));
     }
 
@@ -380,8 +252,8 @@ contract HederaVault is IERC4626, FeeConfiguration, TokenBalancer, Ownable, Reen
      * @param user The user address.
      * @return The amount of underlying assets equivalent to the user's shares.
      */
-    function assetsOf(address user) public view override returns (uint256) {
-        return previewRedeem(balanceOf[user]);
+    function assetsOf(address user) public view returns (uint256) {
+        return previewRedeem(share.balanceOf(user));
     }
 
     /**
@@ -389,8 +261,8 @@ contract HederaVault is IERC4626, FeeConfiguration, TokenBalancer, Ownable, Reen
      *
      * @return The asset amount per share.
      */
-    function assetsPerShare() public view override returns (uint256) {
-        return previewRedeem(10 ** decimals);
+    function assetsPerShare() public view returns (uint256) {
+        return previewRedeem(10 ** share.decimals());
     }
 
     /**
@@ -398,7 +270,7 @@ contract HederaVault is IERC4626, FeeConfiguration, TokenBalancer, Ownable, Reen
      *
      * @return The maximum assets amount that can be deposited.
      */
-    function maxDeposit(address) public pure override returns (uint256) {
+    function maxDeposit(address) public pure returns (uint256) {
         return type(uint256).max;
     }
 
@@ -407,7 +279,7 @@ contract HederaVault is IERC4626, FeeConfiguration, TokenBalancer, Ownable, Reen
      *
      * @return The maximum shares amount that can be minted.
      */
-    function maxMint(address) public pure override returns (uint256) {
+    function maxMint(address) public pure returns (uint256) {
         return type(uint256).max;
     }
 
@@ -417,7 +289,7 @@ contract HederaVault is IERC4626, FeeConfiguration, TokenBalancer, Ownable, Reen
      * @param user The user address.
      * @return The maximum amount of assets that can be withdrawn.
      */
-    function maxWithdraw(address user) public view override returns (uint256) {
+    function maxWithdraw(address user) public view returns (uint256) {
         return assetsOf(user);
     }
 
@@ -427,8 +299,8 @@ contract HederaVault is IERC4626, FeeConfiguration, TokenBalancer, Ownable, Reen
      * @param user The user address.
      * @return The maximum number of shares that can be redeemed.
      */
-    function maxRedeem(address user) public view override returns (uint256) {
-        return balanceOf[user];
+    function maxRedeem(address user) public view returns (uint256) {
+        return share.balanceOf(user);
     }
 
     /**
@@ -437,10 +309,10 @@ contract HederaVault is IERC4626, FeeConfiguration, TokenBalancer, Ownable, Reen
      * @param amount The amount of underlying assets to deposit.
      * @return shares The estimated amount of shares that can be minted.
      */
-    function previewDeposit(uint256 amount) public view override returns (uint256 shares) {
-        uint256 supply = totalSupply;
+    function previewDeposit(uint256 amount) public view returns (uint256 shares) {
+        uint256 supply = totalAssets();
 
-        return supply == 0 ? amount : amount.mulDivDown(1, totalAssets());
+        return supply == 0 ? amount : amount.mul(1e18).div(supply);
     }
 
     /**
@@ -449,10 +321,10 @@ contract HederaVault is IERC4626, FeeConfiguration, TokenBalancer, Ownable, Reen
      * @param shares The shares amount to be minted.
      * @return amount The estimated assets amount.
      */
-    function previewMint(uint256 shares) public view override returns (uint256 amount) {
-        uint256 supply = totalSupply;
+    function previewMint(uint256 shares) public view returns (uint256 amount) {
+        uint256 supply = totalAssets();
 
-        return supply == 0 ? shares : shares.mulDivUp(totalAssets(), totalSupply);
+        return supply == 0 ? shares : shares.mul(supply).div(1e18);
     }
 
     /**
@@ -461,10 +333,10 @@ contract HederaVault is IERC4626, FeeConfiguration, TokenBalancer, Ownable, Reen
      * @param amount The amount of underlying assets to withdraw.
      * @return shares The estimated shares amount that can be burned.
      */
-    function previewWithdraw(uint256 amount) public view override returns (uint256 shares) {
-        uint256 supply = asset.balanceOf(address(this));
+    function previewWithdraw(uint256 amount) public view returns (uint256 shares) {
+        uint256 supply = totalAssets();
 
-        return supply == 0 ? amount : amount.mulDivUp(supply, totalAssets());
+        return supply == 0 ? amount : amount.mul(1e18).div(supply);
     }
 
     /**
@@ -473,10 +345,10 @@ contract HederaVault is IERC4626, FeeConfiguration, TokenBalancer, Ownable, Reen
      * @param shares The shares amount to redeem.
      * @return amount The estimated assets amount that can be redeemed.
      */
-    function previewRedeem(uint256 shares) public view override returns (uint256 amount) {
-        uint256 supply = totalSupply;
+    function previewRedeem(uint256 shares) public view returns (uint256 amount) {
+        uint256 supply = totalAssets();
 
-        return supply == 0 ? shares : shares.mulDivDown(totalAssets(), totalSupply);
+        return supply == 0 ? shares : shares.mul(supply).div(1e18);
     }
 
     /*///////////////////////////////////////////////////////////////
@@ -486,19 +358,14 @@ contract HederaVault is IERC4626, FeeConfiguration, TokenBalancer, Ownable, Reen
     /**
      * @dev Adds reward to the Vault with a specified vesting period.
      *
-     * This function is called by an authorized user to add rewards to the vault. It associates
-     * the reward token with the contract, updates the reward periods, and transfers the reward tokens
+     * This function is called by an authorized user to add rewards to the vault. It updates the reward periods, and transfers the reward tokens
      * to the vault.
      *
      * @param _token The reward token address.
      * @param _amount The amount of reward token to add.
      * @param _vestingPeriod The vesting period for the reward token.
      */
-    function addReward(
-        address _token,
-        uint256 _amount,
-        uint256 _vestingPeriod
-    ) external payable onlyRole(VAULT_REWARD_CONTROLLER_ROLE) {
+    function addReward(address _token, uint256 _amount, uint256 _vestingPeriod) external onlyOwner {
         // Ensure the token address is not zero, which would be invalid
         require(_token != address(0), "Vault: Token address can't be zero");
 
@@ -539,8 +406,6 @@ contract HederaVault is IERC4626, FeeConfiguration, TokenBalancer, Ownable, Reen
         // If the token is not already in the reward tokens list, add it
         if (!tokenExists) {
             rewardTokens.push(_token);
-
-            SafeHTS.safeAssociateToken(_token, address(this));
         }
 
         // Add a new reward period for the token
@@ -563,7 +428,7 @@ contract HederaVault is IERC4626, FeeConfiguration, TokenBalancer, Ownable, Reen
      * @param _startPosition The starting index in the reward token list from which to begin claiming rewards.
      * @return The index of the start position after the last claimed reward and the total number of reward tokens.
      */
-    function claimAllReward(uint256 _startPosition) public payable returns (uint256, uint256) {
+    function claimAllReward(uint256 _startPosition) public returns (uint256, uint256) {
         // Get the total number of reward tokens available in the vault
         uint256 rewardTokensSize = rewardTokens.length;
 
@@ -572,7 +437,7 @@ contract HederaVault is IERC4626, FeeConfiguration, TokenBalancer, Ownable, Reen
             // Get the current reward token address
             address token = rewardTokens[i];
             // Calculate the total unlocked reward for the caller for this token
-            uint256 totalUnlockedReward = getUserReward(token, msg.sender);
+            uint256 totalUnlockedReward = getUserReward(msg.sender, token);
 
             // If there are no rewards to claim, skip to the next token
             if (totalUnlockedReward == 0) {
@@ -580,7 +445,7 @@ contract HederaVault is IERC4626, FeeConfiguration, TokenBalancer, Ownable, Reen
             }
 
             // Transfer the unlocked reward tokens from the vault to the caller
-            SafeHTS.safeTransferToken(token, address(this), msg.sender, int64(uint64(totalUnlockedReward)));
+            ERC20(token).transfer(msg.sender, totalUnlockedReward);
         }
 
         // Return the start position after the last claimed reward and the total number of reward tokens
@@ -610,6 +475,9 @@ contract HederaVault is IERC4626, FeeConfiguration, TokenBalancer, Ownable, Reen
 
         // Retrieve the reward info for the specified token
         RewardsInfo storage rewardInfo = tokensRewardInfo[_token];
+
+        // Ensure the vesting period is not zero to prevent division by zero
+        require(rewardInfo.vestingPeriod > 0, "Vault: Vesting period can't be zero");
 
         // Get the current time for reward calculations
         uint256 currentTime = block.timestamp;
@@ -660,8 +528,10 @@ contract HederaVault is IERC4626, FeeConfiguration, TokenBalancer, Ownable, Reen
                     }
                 }
 
-                // Calculate the unlocked reward for this period and add it to the total unlocked reward
-                unlockedReward += (depositStr.amount * period.rewardPerShare * timeElapsed) / rewardInfo.vestingPeriod;
+                // Calculate the proportion of rewards that have vested for this period
+                unlockedReward += depositStr.amount.mul(period.rewardPerShare).mul(timeElapsed).div(
+                    rewardInfo.vestingPeriod
+                ); // Multiply by the reward per share for the period // Multiply by the time that has elapsed within this period // Divide by the total vesting period to get the pro-rata amount
             }
 
             // Subtract any previously claimed rewards for this deposit
@@ -681,6 +551,7 @@ contract HederaVault is IERC4626, FeeConfiguration, TokenBalancer, Ownable, Reen
      * @param _user The user address.
      * @return _rewards The calculated rewards.
      */
+
     function getAllRewards(address _user) public view returns (uint256[] memory) {
         require(_user != address(0), "Vault: User address can't be zero");
         uint256[] memory _rewards = new uint256[](rewardTokens.length);
@@ -701,31 +572,6 @@ contract HederaVault is IERC4626, FeeConfiguration, TokenBalancer, Ownable, Reen
      * @param _currentTime The current block timestamp.
      */
     function _addRewardPeriod(address _token, uint256 _amount, uint256 _currentTime) internal {
-        // // Ensure the token address is not zero (an invalid address)
-        // require(_token != address(0), "Vault: Token address can't be zero");
-        // // Ensure the amount is not zero
-        // require(_amount != 0, "Vault: Amount can't be zero");
-        // // Ensure the current time is not zero
-        // require(_currentTime != 0, "Vault: Current time can't be zero");
-
-        // // Retrieve the rewards information for the specified token
-        // RewardsInfo storage rewardInfo = tokensRewardInfo[_token];
-        // // Get the number of existing reward periods for this token
-        // uint256 rewardPeriodsLength = rewardInfo.rewardPeriods.length;
-
-        // // If there are existing reward periods, update the end time of the last period
-        // if (rewardPeriodsLength > 0) {
-        //     rewardInfo.rewardPeriods[rewardPeriodsLength - 1].endTime = _currentTime;
-        // }
-
-        // // Calculate the reward per share for the new period
-        // uint256 rewardPerShare = _amount / assetTotalSupply;
-
-        // // Add a new reward period starting at the current time with the calculated reward per share
-        // rewardInfo.rewardPeriods.push(
-        //     RewardPeriod({startTime: _currentTime, endTime: 0, rewardPerShare: rewardPerShare})
-        // );
-
         // Ensure the token address is not zero (an invalid address)
         require(_token != address(0), "Vault: Token address can't be zero");
         // Ensure the amount is not zero
@@ -754,15 +600,18 @@ contract HederaVault is IERC4626, FeeConfiguration, TokenBalancer, Ownable, Reen
     }
 }
 
-library Bits {
-    uint256 internal constant ONE = uint256(1);
+/**
+ * @title CustomERC20
+ * @dev Implementation of the ERC20 Token to be used as shares.
+ */
+contract CustomERC20 is ERC20 {
+    constructor(string memory name, string memory symbol) ERC20(name, symbol) {}
 
-    /**
-     * @dev Sets the bit at the given 'index' in 'self' to '1'.
-     *
-     * @return Returns the modified value.
-     */
-    function setBit(uint256 self, uint8 index) internal pure returns (uint256) {
-        return self | (ONE << index);
+    function mint(address to, uint256 amount) public {
+        _mint(to, amount);
+    }
+
+    function burnFrom(address account, uint256 amount) public {
+        _burn(account, amount);
     }
 }
