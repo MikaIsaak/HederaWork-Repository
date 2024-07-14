@@ -585,25 +585,26 @@ contract HederaVault is IERC4626, FeeConfiguration, TokenBalancer, Ownable, Reen
             for (uint256 j = 0; j < rewardPeriodsLength; j++) {
                 // Get the specific reward period information
                 RewardPeriod storage period = rewardInfo.rewardPeriods[j];
+                // Calculate the elapsed time for the current period
+                uint256 timeElapsed;
 
                 // Skip this period if it starts after the vesting period ends
                 if (period.startTime > vestingEndTime) {
                     continue;
                 }
 
-                // Calculate the elapsed time for the current period
-                uint256 timeElapsed;
-                if (currentTime > vestingEndTime) {
-                    // If the current time is past the vesting end time, calculate time up to the vesting end time
-                    timeElapsed = vestingEndTime - period.startTime;
+                if (period.endTime == 0) {
+                    if (currentTime >= vestingEndTime) {
+                        timeElapsed = vestingEndTime - period.startTime;
+                    } else {
+                        timeElapsed = currentTime - period.startTime;
+                    }
                 } else {
-                    // Otherwise, calculate time up to the current time
-                    timeElapsed = currentTime - period.startTime;
-                }
-
-                // If the reward period has ended, adjust the elapsed time accordingly
-                if (period.endTime != 0 && currentTime > period.endTime) {
-                    timeElapsed = period.endTime - period.startTime;
+                    if (vestingEndTime >= period.endTime) {
+                        timeElapsed = period.endTime - period.startTime;
+                    } else {
+                        timeElapsed = vestingEndTime - period.startTime;
+                    }
                 }
 
                 // Calculate the unlocked reward for this period and add it to the total unlocked reward
