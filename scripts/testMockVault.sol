@@ -21,9 +21,13 @@ contract DeployAndSetup is Script {
         RewardToken1 rewardToken = new RewardToken1();
         rewardToken.mint(deployer, 1000 ether); // Mint 1000 tokens to the deployer
 
+        RewardToken1 rewardToken2 = new RewardToken1();
+        rewardToken2.mint(deployer, 1000 ether); // Mint 1000 tokens to the deployer
+
         // Prepare arguments for Vault deployment
-        address[] memory rewardTokens = new address[](1);
+        address[] memory rewardTokens = new address[](2);
         rewardTokens[0] = address(rewardToken);
+        rewardTokens[1] = address(rewardToken2);
 
         // Deploy Vault
         Vault vault = new Vault(ERC20(address(assetToken)), "VaultShare", "VSHR", rewardTokens);
@@ -31,9 +35,11 @@ contract DeployAndSetup is Script {
         // Approve Vault to spend tokens
         assetToken.approve(address(vault), 1000 ether);
         rewardToken.approve(address(vault), 1000 ether);
+        rewardToken2.approve(address(vault), 1000 ether);
 
         console.log("AssetToken address:", address(assetToken));
         console.log("RewardToken1 address:", address(rewardToken));
+        console.log("RewardToken2 address:", address(rewardToken2));
         console.log("Vault address:", address(vault));
         console.log("Deployer address:", deployer);
         console.log("Deployer balance of AssetToken:", assetToken.balanceOf(deployer));
@@ -43,14 +49,21 @@ contract DeployAndSetup is Script {
         vault.deposit(1000 ether, deployer);
 
         // Add Reward to the Vault
-        vault.addReward(address(rewardToken), 1000 ether, 30);
+        vault.addReward(address(rewardToken), 1000 ether, 30 days);
         console.log("Deployer balance of RewardToken1:", rewardToken.balanceOf(deployer));
 
-        vm.warp(block.timestamp + 30 days);
+        vm.warp(block.timestamp + 15 days);
+
+        // Add Reward to the Vault
+        vault.addReward(address(rewardToken2), 1000 ether, 30 days);
+        console.log("Deployer balance of RewardToken2:", rewardToken2.balanceOf(deployer));
+
+        vm.warp(block.timestamp + 15 days);
 
         console.log("Reward is ", vault.getUserReward(deployer, address(rewardToken)));
         vault.claimAllReward(0);
         console.log("Deployer balance of RewardToken1:", rewardToken.balanceOf(deployer));
+        console.log("Deployer balance of RewardToken2:", rewardToken2.balanceOf(deployer));
 
         vm.stopBroadcast();
     }

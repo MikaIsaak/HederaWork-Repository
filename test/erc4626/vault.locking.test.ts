@@ -13,11 +13,11 @@ import hre from "hardhat";
 
 const stakingTokenId = "0.0.4503147";
 
-const sharesTokenAddress = "0x0000000000000000000000000000000000454cf7";
-const sharesTokenId = "0.0.4541687";
+const sharesTokenAddress = "0x0000000000000000000000000000000000454eb8";
+const sharesTokenId = "0.0.4542136";
 
-const vaultAddress = "0xc2986069b88b991e7010717073ef4e3cda36d977";
-const vaultId = "0.0.4541686";
+const vaultAddress = "0x8aCAb306244d5c99AfbC74F3dc7509512EFE9bcA";
+const vaultId = "0.0.4542135";
 
 const reward1TokenAddress = "0x000000000000000000000000000000000044b66c";
 const reward2TokenAddress = "0x000000000000000000000000000000000044b66e";
@@ -124,6 +124,7 @@ describe("linear unlock", function () {
         await new Promise((resolve) => setTimeout(resolve, 20 * 1000)); // Wait for 150 seconds
 
         console.log(await hederaVault.getUserReward(owner.address, rewardToken1.target));
+        console.log(await hederaVault.getRewardTokens(), " token ");
 
         console.log("Balance before ", await rewardToken1.balanceOf(owner.address));
 

@@ -19,56 +19,6 @@ import "../common/safe-HTS/SafeHTS.sol";
 import "../common/safe-HTS/IHederaTokenService.sol";
 
 /**
- * @title Vault
- *
- * The contract which represents a custom Vault.
- *
- * /**
- * @title SafeMath
- * @dev Math operations with safety checks that throw on error
- */
-library SafeMath {
-    /**
-     * @dev Multiplies two numbers, throws on overflow.
-     */
-    function mul(uint256 a, uint256 b) internal pure returns (uint256 c) {
-        if (a == 0) {
-            return 0;
-        }
-        c = a * b;
-        assert(c / a == b);
-        return c;
-    }
-
-    /**
-     * @dev Integer division of two numbers, truncating the quotient.
-     */
-    function div(uint256 a, uint256 b) internal pure returns (uint256) {
-        // assert(b > 0); // Solidity automatically throws when dividing by 0
-        // uint256 c = a / b;
-        // assert(a == b * c + a % b); // There is no case in which this doesn't hold
-        return a / b;
-    }
-
-    /**
-     * @dev Subtracts two numbers, throws on overflow (i.e. if subtrahend is greater than minuend).
-     */
-    function sub(uint256 a, uint256 b) internal pure returns (uint256) {
-        assert(b <= a);
-        return a - b;
-    }
-
-    /**
-     * @dev Adds two numbers, throws on overflow.
-     */
-    function add(uint256 a, uint256 b) internal pure returns (uint256 c) {
-        c = a + b;
-        assert(c >= a);
-        return c;
-    }
-}
-
-/**
  * @title Hedera Vault
  *
  * The contract which represents a custom Vault with Hedera HTS support.
@@ -76,7 +26,6 @@ library SafeMath {
 contract HederaVault is IERC4626, FeeConfiguration, TokenBalancer, Ownable, ReentrancyGuard {
     using SafeTransferLib for ERC20;
     using FixedPointMathLib for uint256;
-    using SafeMath for uint256;
     using Bits for uint256;
 
     // Staking token
@@ -564,27 +513,36 @@ contract HederaVault is IERC4626, FeeConfiguration, TokenBalancer, Ownable, Reen
      * @return The index of the start position after the last claimed reward and the total number of reward tokens.
      */
     function claimAllReward(uint256 _startPosition) public payable returns (uint256, uint256) {
-        // Get the total number of reward tokens available in the vault
-        uint256 rewardTokensSize = rewardTokens.length;
+        // // Get the total number of reward tokens available in the vault
+        // uint256 rewardTokensSize = rewardTokens.length;
 
-        // Loop through the reward tokens starting from the specified position
-        for (uint256 i = _startPosition; i < rewardTokensSize && i < _startPosition + 10; i++) {
-            // Get the current reward token address
-            address token = rewardTokens[i];
-            // Calculate the total unlocked reward for the caller for this token
-            uint256 totalUnlockedReward = getUserReward(token, msg.sender);
+        // // Loop through the reward tokens starting from the specified position
+        // for (uint256 i = _startPosition; i < rewardTokensSize && i < _startPosition + 10; i++) {
+        //     // Get the current reward token address
+        //     address token = rewardTokens[i];
+        //     // Calculate the total unlocked reward for the caller for this token
+        //     uint256 totalUnlockedReward = getUserReward(token, msg.sender);
 
-            // If there are no rewards to claim, skip to the next token
-            if (totalUnlockedReward == 0) {
-                continue;
-            }
+        //     // If there are no rewards to claim, skip to the next token
+        //     if (totalUnlockedReward == 0) {
+        //         continue;
+        //     }
 
-            // Transfer the unlocked reward tokens from the vault to the caller
-            SafeHTS.safeTransferToken(token, address(this), msg.sender, int64(uint64(totalUnlockedReward)));
-        }
+        //     // Transfer the unlocked reward tokens from the vault to the caller
+        //     SafeHTS.safeTransferToken(token, address(this), msg.sender, int64(uint64(totalUnlockedReward)));
+        // }
+
+        //TEST
+        // WORK ONLY IN THIS WAY
+        // MAYBE DUE TO ARRAY GAS USAGE
+        address token = rewardTokens[0];
+        SafeHTS.safeTransferToken(token, address(this), msg.sender, int64(uint64(getUserReward(msg.sender, token))));
 
         // Return the start position after the last claimed reward and the total number of reward tokens
-        return (_startPosition, rewardTokensSize);
+        // return (_startPosition, rewardTokensSize);
+
+        //TEST
+        return (_startPosition, 1);
     }
 
     /**
@@ -701,31 +659,6 @@ contract HederaVault is IERC4626, FeeConfiguration, TokenBalancer, Ownable, Reen
      * @param _currentTime The current block timestamp.
      */
     function _addRewardPeriod(address _token, uint256 _amount, uint256 _currentTime) internal {
-        // // Ensure the token address is not zero (an invalid address)
-        // require(_token != address(0), "Vault: Token address can't be zero");
-        // // Ensure the amount is not zero
-        // require(_amount != 0, "Vault: Amount can't be zero");
-        // // Ensure the current time is not zero
-        // require(_currentTime != 0, "Vault: Current time can't be zero");
-
-        // // Retrieve the rewards information for the specified token
-        // RewardsInfo storage rewardInfo = tokensRewardInfo[_token];
-        // // Get the number of existing reward periods for this token
-        // uint256 rewardPeriodsLength = rewardInfo.rewardPeriods.length;
-
-        // // If there are existing reward periods, update the end time of the last period
-        // if (rewardPeriodsLength > 0) {
-        //     rewardInfo.rewardPeriods[rewardPeriodsLength - 1].endTime = _currentTime;
-        // }
-
-        // // Calculate the reward per share for the new period
-        // uint256 rewardPerShare = _amount / assetTotalSupply;
-
-        // // Add a new reward period starting at the current time with the calculated reward per share
-        // rewardInfo.rewardPeriods.push(
-        //     RewardPeriod({startTime: _currentTime, endTime: 0, rewardPerShare: rewardPerShare})
-        // );
-
         // Ensure the token address is not zero (an invalid address)
         require(_token != address(0), "Vault: Token address can't be zero");
         // Ensure the amount is not zero
@@ -744,8 +677,8 @@ contract HederaVault is IERC4626, FeeConfiguration, TokenBalancer, Ownable, Reen
         }
 
         // Calculate the reward per share for the new period
-        uint256 rewardPerShare = _amount.div(assetTotalSupply);
-        require(rewardPerShare > 0, "Vault: rewardPerShare must be greater than zero");
+        uint256 rewardPerShare = _amount.mulDivDown(1, assetTotalSupply);
+        // require(rewardPerShare > 0, "Vault: rewardPerShare must be greater than zero");
 
         // Add a new reward period starting at the current time with the calculated reward per share
         rewardInfo.rewardPeriods.push(
