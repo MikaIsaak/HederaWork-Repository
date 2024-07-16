@@ -275,8 +275,6 @@ contract HederaVault is IERC4626, FeeConfiguration, TokenBalancer, Ownable, Reen
      * @param _amount The amount of tokens deposited.
      */
     function afterDeposit(uint256 _amount) internal {
-        require(_amount != 0, "Vault: Amount can't be zero");
-
         if (!userContribution[msg.sender].exist) {
             uint256 rewardTokensSize = rewardTokens.length;
             for (uint256 i = 0; i < rewardTokensSize; i++) {
@@ -291,7 +289,9 @@ contract HederaVault is IERC4626, FeeConfiguration, TokenBalancer, Ownable, Reen
         }
 
         UserDeposit storage newDeposit = userContribution[msg.sender].deposits.push();
+
         newDeposit.amount = _amount;
+
         newDeposit.timestamp = block.timestamp;
     }
 
@@ -455,6 +455,8 @@ contract HederaVault is IERC4626, FeeConfiguration, TokenBalancer, Ownable, Reen
             "Vault: Reward and Staking tokens cannot be same"
         );
 
+        if (rewardTokens.length == 10) revert MaxRewardTokensAmount();
+
         RewardsInfo storage rewardInfo = tokensRewardInfo[_token];
 
         rewardInfo.vestingPeriod = _vestingPeriod;
@@ -478,7 +480,7 @@ contract HederaVault is IERC4626, FeeConfiguration, TokenBalancer, Ownable, Reen
 
         _addRewardPeriod(_token, _amount, currentTime);
 
-        ERC20(_token).transferFrom(msg.sender, address(this), _amount);
+        ERC20(_token).safeTransferFrom(msg.sender, address(this), _amount);
 
         emit RewardAdded(_token, _amount);
     }
@@ -601,7 +603,7 @@ contract HederaVault is IERC4626, FeeConfiguration, TokenBalancer, Ownable, Reen
      */
     function getAllRewards(address _user) public view returns (uint256[] memory) {
         require(_user != address(0), "Vault: User address can't be zero");
-        uint256[] memory _rewards = new uint256[](rewardTokens.length);
+        uint256[] memory _rewards;
 
         for (uint256 i = 0; i < rewardTokens.length; i++) {
             _rewards[i] = getUserReward(_user, rewardTokens[i]);
@@ -619,10 +621,6 @@ contract HederaVault is IERC4626, FeeConfiguration, TokenBalancer, Ownable, Reen
      * @param _currentTime The current block timestamp.
      */
     function _addRewardPeriod(address _token, uint256 _amount, uint256 _currentTime) internal {
-        require(_token != address(0), "Vault: Token address can't be zero");
-        require(_amount != 0, "Vault: Amount can't be zero");
-        require(_currentTime != 0, "Vault: Current time can't be zero");
-
         RewardsInfo storage rewardInfo = tokensRewardInfo[_token];
         uint256 rewardPeriodsLength = rewardInfo.rewardPeriods.length;
 
