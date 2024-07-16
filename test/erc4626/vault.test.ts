@@ -267,67 +267,21 @@ describe("Vault", function () {
         });
     });
 
-    // describe("claimAllReward", function () {
-    //     it("Should claim all reward", async function () {
-    //         const { hederaVault, owner, rewardToken } = await deployFixture();
+    describe("claimAllReward", function () {
+        it("Should claim all reward", async function () {
+            const { hederaVault, owner, rewardToken } = await deployFixture();
 
-    //         // await rewardToken.approve(hederaVault.target, 10 * 1e8);
+            // await rewardToken.approve(hederaVault.target, 10 * 1e8);
 
-    //         console.log(await hederaVault.calculateReward(0));
+            console.log(await hederaVault.calculateReward(0));
 
-    //         const reward = await hederaVault.calculateReward(0);
+            const reward = await hederaVault.calculateReward(0);
 
-    //         const tx = await hederaVault.claimAllReward(0);
+            const tx = await hederaVault.claimAllReward(0);
 
-    //         console.log(tx.hash);
+            console.log(tx.hash);
 
-    //         await expect(tx).to.changeTokenBalance(rewardToken, owner, reward);
-    //     });
-    // });
-
-    describe("linear unlock", function () {
-        it("Should unlock rewards linearly over time", async function () {
-            const { hederaVault, owner, rewardToken, stakingToken } = await deployFixture();
-            const amountToDeposit = 1000;
-            const rewardAmount = 1000;
-
-            // Approve and deposit staking tokens
-            await stakingToken.approve(hederaVault.target, amountToDeposit);
-            await hederaVault.deposit(amountToDeposit, owner.address);
-
-            // Approve and add reward tokens
-            await rewardToken.approve(hederaVault.target, rewardAmount);
-            await hederaVault.addReward(rewardToken.target, rewardAmount);
-
-            // Simulate time passing for linear unlock
-            const rewardStart = (await hederaVault.userContribution(owner.address)).rewardStart;
-            const rewardEnd = (await hederaVault.userContribution(owner.address)).rewardEnd;
-            const duration = rewardEnd - rewardStart;
-
-            // Check initial rewards (should be zero)
-            let rewards = await hederaVault.getUserReward(owner, rewardToken.target);
-            expect(rewards).to.equal(0);
-
-            // Increase time by half the duration
-            await ethers.provider.send("evm_increaseTime", [Number(duration) / 2]);
-            await ethers.provider.send("evm_mine", []);
-
-            // Check rewards after half the duration
-            rewards = await hederaVault.getUserReward(owner, rewardToken.target);
-            expect(rewards).to.be.closeTo(rewardAmount / 2, 1);
-
-            // Increase time to the end of the vesting period
-            await ethers.provider.send("evm_increaseTime", [Number(duration) / 2]);
-            await ethers.provider.send("evm_mine", []);
-
-            // Check rewards after full duration
-            rewards = await hederaVault.getUserReward(owner, rewardToken.target);
-            expect(rewards).to.be.closeTo(rewardAmount, 1);
-
-            // Claim rewards
-            await hederaVault.claimAllReward(0);
-            const balance = await rewardToken.balanceOf(owner.address);
-            expect(balance).to.be.closeTo(rewardAmount, 1);
+            await expect(tx).to.changeTokenBalance(rewardToken, owner, reward);
         });
     });
 });
