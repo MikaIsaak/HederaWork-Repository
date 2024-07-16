@@ -122,6 +122,13 @@ contract HederaVault is IERC4626, FeeConfiguration, TokenBalancer, Ownable, Reen
         _createTokenWithContractAsOwner(_name, _symbol, _underlying);
     }
 
+    /**
+     * @dev Creates share token with contract as owner.
+     *
+     * @param _name The share token name.
+     * @param _symbol The share token symbol.
+     * @param _underlying The address of the asset token.
+     */
     function _createTokenWithContractAsOwner(string memory _name, string memory _symbol, ERC20 _underlying) internal {
         SafeHTS.safeAssociateToken(address(_underlying), address(this));
         uint256 supplyKeyType;
@@ -267,12 +274,9 @@ contract HederaVault is IERC4626, FeeConfiguration, TokenBalancer, Ownable, Reen
     }
 
     /**
-     * @dev Updates user state after deposit and mint calls.
+     * @dev Updates user state according to deposit inputs.
      *
-     * This function updates the user's contribution information after they deposit tokens into the vault.
-     * If it's the user's first deposit, it associates the reward tokens with the user.
-     *
-     * @param _amount The amount of tokens deposited.
+     * @param _amount The amount of shares.
      */
     function afterDeposit(uint256 _amount) internal {
         if (!userContribution[msg.sender].exist) {
@@ -427,11 +431,7 @@ contract HederaVault is IERC4626, FeeConfiguration, TokenBalancer, Ownable, Reen
     //////////////////////////////////////////////////////////////*/
 
     /**
-     * @dev Adds reward to the Vault with a specified vesting period.
-     *
-     * This function is called by an authorized user to add rewards to the vault. It associates
-     * the reward token with the contract, updates the reward periods, and transfers the reward tokens
-     * to the vault.
+     * @dev Adds reward token.
      *
      * @param _token The reward token address.
      * @param _amount The amount of reward token to add.
@@ -488,10 +488,6 @@ contract HederaVault is IERC4626, FeeConfiguration, TokenBalancer, Ownable, Reen
     /**
      * @dev Claims all pending reward tokens for the caller.
      *
-     * This function allows a user to claim all their pending rewards for all reward tokens
-     * starting from a specified position in the reward token list. It calculates the total
-     * unlocked rewards for each token and transfers them to the caller.
-     *
      * @param _startPosition The starting index in the reward token list from which to begin claiming rewards.
      * @return The index of the start position after the last claimed reward and the total number of reward tokens.
      */
@@ -527,11 +523,7 @@ contract HederaVault is IERC4626, FeeConfiguration, TokenBalancer, Ownable, Reen
     }
 
     /**
-     * @dev Returns user reward of a specific token.
-     *
-     * This function calculates the total unlocked reward for a given user and token.
-     * It considers all the deposits made by the user and computes the unlocked rewards
-     * based on the reward periods.
+     * @dev Calculates user reward of a specific token.
      *
      * @param _user The user address.
      * @param _token The reward token address.
@@ -596,7 +588,7 @@ contract HederaVault is IERC4626, FeeConfiguration, TokenBalancer, Ownable, Reen
     }
 
     /**
-     * @dev Returns all rewards for a user.
+     * @dev Calculates all rewards for a user.
      *
      * @param _user The user address.
      * @return _rewards The calculated rewards.
@@ -613,8 +605,6 @@ contract HederaVault is IERC4626, FeeConfiguration, TokenBalancer, Ownable, Reen
 
     /**
      * @dev Adds a new reward period for a given token.
-     *
-     * This function sets up a new reward period, ensuring that the previous period ends at the current time.
      *
      * @param _token The reward token address.
      * @param _amount The amount of reward token to add.
