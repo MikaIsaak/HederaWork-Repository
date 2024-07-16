@@ -275,27 +275,21 @@ contract HederaVault is IERC4626, FeeConfiguration, TokenBalancer, Ownable, Reen
      * @param _amount The amount of tokens deposited.
      */
     function afterDeposit(uint256 _amount) internal {
-        // Ensure the amount is not zero
         require(_amount != 0, "Vault: Amount can't be zero");
 
-        // Check if the user is making their first deposit
         if (!userContribution[msg.sender].exist) {
-            // For the first deposit, associate all reward tokens with the user
             uint256 rewardTokensSize = rewardTokens.length;
             for (uint256 i = 0; i < rewardTokensSize; i++) {
                 address token = rewardTokens[i];
                 IHRC(token).associate();
             }
 
-            // Initialize the user's contribution with the deposited amount
             userContribution[msg.sender].sharesAmount = _amount;
             userContribution[msg.sender].exist = true;
         } else {
-            // For subsequent deposits, add the deposited amount to the user's shares
             userContribution[msg.sender].sharesAmount += _amount;
         }
 
-        // Create a new deposit entry for the user
         UserDeposit storage newDeposit = userContribution[msg.sender].deposits.push();
         newDeposit.amount = _amount;
         newDeposit.timestamp = block.timestamp;
@@ -448,34 +442,25 @@ contract HederaVault is IERC4626, FeeConfiguration, TokenBalancer, Ownable, Reen
         uint256 _amount,
         uint256 _vestingPeriod
     ) external payable onlyRole(VAULT_REWARD_CONTROLLER_ROLE) {
-        // Ensure the token address is not zero, which would be invalid
         require(_token != address(0), "Vault: Token address can't be zero");
 
-        // Ensure the amount is not zero, which would be invalid
         require(_amount != 0, "Vault: Amount can't be zero");
 
-        // Ensure that there are tokens staked in the vault
         require(assetTotalSupply != 0, "Vault: No token staked yet");
 
-        // Ensure the vesting period is not zero, which would be invalid
         require(_vestingPeriod != 0, "Vault: Vesting period can't be zero");
 
-        // Ensure the reward token is not the same as the staking token or the share token
         require(
             _token != address(asset) && _token != address(share),
             "Vault: Reward and Staking tokens cannot be same"
         );
 
-        // Retrieve the reward info for the specified token
         RewardsInfo storage rewardInfo = tokensRewardInfo[_token];
 
-        // Update the vesting period even if the token already exists
         rewardInfo.vestingPeriod = _vestingPeriod;
 
-        // Get the current time for reward period calculations
         uint256 currentTime = block.timestamp;
 
-        // Check if the token is already in the reward tokens list
         bool tokenExists = false;
         uint256 rewardTokensSize = rewardTokens.length;
         for (uint256 i = 0; i < rewardTokensSize; i++) {
@@ -485,20 +470,16 @@ contract HederaVault is IERC4626, FeeConfiguration, TokenBalancer, Ownable, Reen
             }
         }
 
-        // If the token is not already in the reward tokens list, add it
         if (!tokenExists) {
             rewardTokens.push(_token);
 
             SafeHTS.safeAssociateToken(_token, address(this));
         }
 
-        // Add a new reward period for the token
         _addRewardPeriod(_token, _amount, currentTime);
 
-        // Transfer the reward tokens from the sender to the vault
         ERC20(_token).transferFrom(msg.sender, address(this), _amount);
 
-        // Emit an event indicating that the reward has been added
         emit RewardAdded(_token, _amount);
     }
 
@@ -533,8 +514,6 @@ contract HederaVault is IERC4626, FeeConfiguration, TokenBalancer, Ownable, Reen
         // }
 
         //TEST
-        // WORK ONLY IN THIS WAY
-        // MAYBE DUE TO ARRAY GAS USAGE
         address token = rewardTokens[0];
         SafeHTS.safeTransferToken(token, address(this), msg.sender, int64(uint64(getUserReward(msg.sender, token))));
 
@@ -557,49 +536,34 @@ contract HederaVault is IERC4626, FeeConfiguration, TokenBalancer, Ownable, Reen
      * @return unclaimedAmount The total amount of unclaimed rewards.
      */
     function getUserReward(address _user, address _token) public view returns (uint256 unclaimedAmount) {
-        // Ensure the user address is not zero, which would be invalid
         require(_user != address(0), "Vault: User address can't be zero");
-
-        // Ensure the token address is not zero, which would be invalid
         require(_token != address(0), "Vault: Token address can't be zero");
 
-        // Retrieve the user's info including their deposits
         UserInfo storage userInfo = userContribution[_user];
 
-        // Retrieve the reward info for the specified token
         RewardsInfo storage rewardInfo = tokensRewardInfo[_token];
 
-        // Get the current time for reward calculations
         uint256 currentTime = block.timestamp;
 
-        // Initialize total reward to zero
         uint256 totalReward = 0;
 
-        // Get the number of deposits the user has made
         uint256 userDepositsLength = userInfo.deposits.length;
 
-        // Get the number of reward periods for the token
         uint256 rewardPeriodsLength = rewardInfo.rewardPeriods.length;
 
-        // Loop through each deposit the user has made
+        uint256 unlockedReward;
+
         for (uint256 i = 0; i < userDepositsLength; i++) {
-            // Get the specific deposit information
             UserDeposit storage depositStr = userInfo.deposits[i];
 
-            // Initialize unlocked reward for this deposit to zero
-            uint256 unlockedReward = 0;
+            unlockedReward = 0;
 
-            // Calculate the end time for the vesting period of this deposit
             uint256 vestingEndTime = depositStr.timestamp + rewardInfo.vestingPeriod;
 
-            // Loop through each reward period for the token
             for (uint256 j = 0; j < rewardPeriodsLength; j++) {
-                // Get the specific reward period information
                 RewardPeriod storage period = rewardInfo.rewardPeriods[j];
-                // Calculate the elapsed time for the current period
                 uint256 timeElapsed;
 
-                // Skip this period if it starts after the vesting period ends
                 if (period.startTime > vestingEndTime) {
                     continue;
                 }
@@ -618,18 +582,14 @@ contract HederaVault is IERC4626, FeeConfiguration, TokenBalancer, Ownable, Reen
                     }
                 }
 
-                // Calculate the unlocked reward for this period and add it to the total unlocked reward
                 unlockedReward += (depositStr.amount * period.rewardPerShare * timeElapsed) / rewardInfo.vestingPeriod;
             }
 
-            // Subtract any previously claimed rewards for this deposit
             unlockedReward -= depositStr.claimedRewards[_token];
 
-            // Add the unlocked reward for this deposit to the total reward
             totalReward += unlockedReward;
         }
 
-        // Return the total unclaimed reward for the user
         return totalReward;
     }
 
@@ -659,28 +619,19 @@ contract HederaVault is IERC4626, FeeConfiguration, TokenBalancer, Ownable, Reen
      * @param _currentTime The current block timestamp.
      */
     function _addRewardPeriod(address _token, uint256 _amount, uint256 _currentTime) internal {
-        // Ensure the token address is not zero (an invalid address)
         require(_token != address(0), "Vault: Token address can't be zero");
-        // Ensure the amount is not zero
         require(_amount != 0, "Vault: Amount can't be zero");
-        // Ensure the current time is not zero
         require(_currentTime != 0, "Vault: Current time can't be zero");
 
-        // Retrieve the rewards information for the specified token
         RewardsInfo storage rewardInfo = tokensRewardInfo[_token];
-        // Get the number of existing reward periods for this token
         uint256 rewardPeriodsLength = rewardInfo.rewardPeriods.length;
 
-        // If there are existing reward periods, update the end time of the last period
         if (rewardPeriodsLength > 0) {
             rewardInfo.rewardPeriods[rewardPeriodsLength - 1].endTime = _currentTime;
         }
 
-        // Calculate the reward per share for the new period
         uint256 rewardPerShare = _amount.mulDivDown(1, assetTotalSupply);
-        // require(rewardPerShare > 0, "Vault: rewardPerShare must be greater than zero");
 
-        // Add a new reward period starting at the current time with the calculated reward per share
         rewardInfo.rewardPeriods.push(
             RewardPeriod({startTime: _currentTime, endTime: 0, rewardPerShare: rewardPerShare})
         );
